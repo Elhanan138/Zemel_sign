@@ -1,0 +1,36 @@
+/* RTL overrides — applied only when dir="rtl" is on <html> */
+[dir="rtl"] body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Arial', 'Tahoma', sans-serif; }
+
+[dir="rtl"] .navbar { flex-direction: row-reverse; }
+[dir="rtl"] .nav-brand { flex-direction: row-reverse; }
+[dir="rtl"] .nav-actions { flex-direction: row-reverse; }
+
+[dir="rtl"] .page-header { flex-direction: row-reverse; }
+[dir="rtl"] .back-link::before { content: '→'; margin-left: 4px; }
+[dir="rtl"] .back-link { direction: rtl; }
+
+[dir="rtl"] .doc-card-header { flex-direction: row-reverse; }
+[dir="rtl"] .doc-card-footer { flex-direction: row-reverse; }
+[dir="rtl"] .doc-actions { flex-direction: row-reverse; }
+
+[dir="rtl"] .form-row { flex-direction: row-reverse; }
+[dir="rtl"] .step-actions { flex-direction: row-reverse; }
+[dir="rtl"] .step-label { flex-direction: row-reverse; }
+
+[dir="rtl"] .signer-row { flex-direction: row-reverse; }
+[dir="rtl"] .signer-chip { flex-direction: row-reverse; }
+
+[dir="rtl"] .file-preview { flex-direction: row-reverse; }
+[dir="rtl"] .signing-link-box { flex-direction: row-reverse; }
+
+[dir="rtl"] .filter-bar { flex-direction: row-reverse; }
+[dir="rtl"] .sig-type-tabs { flex-direction: row-reverse; }
+
+[dir="rtl"] input, [dir="rtl"] textarea { text-align: right; }
+[dir="rtl"] .alert { text-align: right; }
+[dir="rtl"] .help-text { text-align: right; }
+
+[dir="rtl"] .lang-toggle-row { flex-direction: row-reverse; }
+
+/* Auth pages RTL */
+[dir="rtl"] .auth-link { direction: rtl; }
