@@ -4,9 +4,21 @@ let pool;
 
 function getPool() {
   if (!pool) {
+    if (!process.env.DATABASE_URL) {
+      throw new Error('DATABASE_URL environment variable is not set. See /setup for instructions.');
+    }
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+      ssl: process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1')
+        ? false
+        : { rejectUnauthorized: false },
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000
+    });
+    pool.on('error', (err) => {
+      console.error('Unexpected DB pool error:', err.message);
+      pool = null; // allow retry
     });
   }
   return pool;

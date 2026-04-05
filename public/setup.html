@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zemel Sign — Setup</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: linear-gradient(135deg, #dbeafe 0%, #ede9fe 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .card { background: white; border-radius: 16px; padding: 40px; max-width: 520px; width: 100%; box-shadow: 0 8px 40px rgba(0,0,0,0.12); }
+    .icon { font-size: 56px; text-align: center; margin-bottom: 16px; }
+    h1 { text-align: center; font-size: 22px; font-weight: 800; color: #1e293b; margin-bottom: 8px; }
+    .sub { text-align: center; color: #64748b; font-size: 14px; margin-bottom: 32px; }
+    .step { display: flex; gap: 16px; margin-bottom: 20px; padding: 16px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; }
+    .step-num { width: 32px; height: 32px; border-radius: 50%; background: #2563eb; color: white; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 14px; }
+    .step-body h3 { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+    .step-body p { font-size: 13px; color: #64748b; line-height: 1.5; }
+    .step-body code { background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    .btn { display: block; text-align: center; margin-top: 24px; padding: 14px; background: #2563eb; color: white; border-radius: 10px; text-decoration: none; font-weight: 700; font-size: 15px; }
+    .or { text-align: center; margin: 20px 0; color: #94a3b8; font-size: 13px; position: relative; }
+    .or::before, .or::after { content: ''; position: absolute; top: 50%; width: 40%; height: 1px; background: #e2e8f0; }
+    .or::before { right: 0; }
+    .or::after { left: 0; }
+    .docker-box { background: #0f172a; color: #e2e8f0; border-radius: 10px; padding: 16px; font-family: monospace; font-size: 13px; margin-top: 12px; }
+    .docker-box .comment { color: #64748b; }
+    .docker-box .cmd { color: #86efac; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">⚙️</div>
+    <h1>הגדרת Zemel Sign</h1>
+    <p class="sub">בחר את שיטת ההרצה המועדפת עליך</p>
+
+    <div class="step">
+      <div class="step-num">🐳</div>
+      <div class="step-body">
+        <h3>Docker — הכי מהיר (מומלץ)</h3>
+        <p>הרץ פקודה אחת ואתה מוכן. כולל מסד נתונים אוטומטי:</p>
+        <div class="docker-box" style="margin-top:8px">
+          <div class="comment"># בטרמינל:</div>
+          <div class="cmd">docker compose up</div>
+          <div class="comment" style="margin-top:4px"># פתח: http://localhost:3000</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="or">או</div>
+
+    <div class="step">
+      <div class="step-num">▲</div>
+      <div class="step-body">
+        <h3>Vercel — 3 צעדים בלוח הבקרה</h3>
+        <p>
+          1. פתח את הפרויקט ב-Vercel<br>
+          2. לשונית <code>Storage</code> → <code>Create Database</code> → <code>Neon Postgres</code><br>
+          3. לחץ <code>Create</code> — Vercel מגדיר הכל אוטומטית
+        </p>
+      </div>
+    </div>
+
+    <a href="/" class="btn">← חזרה לדף הראשי</a>
+  </div>
+</body>
+</html>
