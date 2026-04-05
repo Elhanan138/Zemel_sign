@@ -1,6 +1,4 @@
 const multer = require('multer');
-const path = require('path');
-const { v4: uuidv4 } = require('uuid');
 
 const ALLOWED_TYPES = {
   'application/pdf': 'pdf',
@@ -8,17 +6,12 @@ const ALLOWED_TYPES = {
   'application/msword': 'doc'
 };
 
-const storage = multer.diskStorage({
-  destination: path.join(__dirname, '../../uploads'),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `${uuidv4()}${ext}`);
-  }
-});
+// Memory storage — no filesystem needed (works on Vercel)
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
     if (ALLOWED_TYPES[file.mimetype]) {
       cb(null, true);

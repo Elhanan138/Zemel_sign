@@ -1,48 +1,46 @@
 const express = require('express');
-const { getDb } = require('../db/database');
+const { getPool } = require('../db/database');
 const { verifyToken } = require('../utils/token');
 const { logEvent } = require('../services/auditService');
 const { embedSignaturesAndFinalize } = require('../services/pdfService');
 
 const router = express.Router();
 
-// GET /api/sign/:token — validate token and return doc info + fields
-router.get('/:token', (req, res, next) => {
+// GET /api/sign/:token
+router.get('/:token', async (req, res, next) => {
   try {
     let payload;
-    try {
-      payload = verifyToken(req.params.token);
-    } catch {
+    try { payload = verifyToken(req.params.token); } catch {
       return res.status(401).json({ error: 'Invalid or expired signing link' });
     }
 
-    const db = getDb();
-    const signer = db.prepare('SELECT * FROM signers WHERE id = ? AND signing_token = ?')
-      .get(payload.signerId, req.params.token);
+    const pool = getPool();
+    const { rows: [signer] } = await pool.query(
+      'SELECT * FROM signers WHERE id = $1 AND signing_token = $2', [payload.signerId, req.params.token]
+    );
     if (!signer) return res.status(401).json({ error: 'Invalid signing token' });
     if (signer.status === 'signed') return res.status(409).json({ error: 'Already signed', signed: true });
 
-    const doc = db.prepare('SELECT id, title, filename, status, page_count FROM documents WHERE id = ?')
-      .get(signer.document_id);
+    const { rows: [doc] } = await pool.query(
+      'SELECT id, title, filename, status, page_count FROM documents WHERE id = $1', [signer.document_id]
+    );
     if (!doc) return res.status(404).json({ error: 'Document not found' });
     if (doc.status === 'voided') return res.status(410).json({ error: 'Document has been voided' });
 
-    const fields = db.prepare(`
-      SELECT * FROM signature_fields WHERE document_id = ? AND signer_id = ?
-      ORDER BY page_number, y_percent
-    `).all(doc.id, signer.id);
+    const { rows: fields } = await pool.query(
+      'SELECT * FROM signature_fields WHERE document_id = $1 AND signer_id = $2 ORDER BY page_number, y_percent',
+      [doc.id, signer.id]
+    );
 
-    // Check if all signers before this one (by signing_order) have signed
-    const blockers = db.prepare(`
-      SELECT id FROM signers
-      WHERE document_id = ? AND signing_order < ? AND status != 'signed'
-    `).all(doc.id, signer.signing_order);
-
+    const { rows: blockers } = await pool.query(
+      "SELECT id FROM signers WHERE document_id = $1 AND signing_order < $2 AND status != 'signed'",
+      [doc.id, signer.signing_order]
+    );
     if (blockers.length > 0) {
       return res.status(403).json({ error: 'Waiting for previous signers', waitingForOthers: true });
     }
 
-    logEvent({
+    await logEvent({
       documentId: doc.id, actorType: 'signer', actorId: signer.id,
       actorName: signer.name, eventType: 'signing_link_accessed', ipAddress: req.ip
     });
@@ -55,103 +53,97 @@ router.get('/:token', (req, res, next) => {
 router.post('/:token/submit', async (req, res, next) => {
   try {
     let payload;
-    try {
-      payload = verifyToken(req.params.token);
-    } catch {
+    try { payload = verifyToken(req.params.token); } catch {
       return res.status(401).json({ error: 'Invalid or expired signing link' });
     }
 
-    const db = getDb();
-    const signer = db.prepare('SELECT * FROM signers WHERE id = ? AND signing_token = ?')
-      .get(payload.signerId, req.params.token);
+    const pool = getPool();
+    const { rows: [signer] } = await pool.query(
+      'SELECT * FROM signers WHERE id = $1 AND signing_token = $2', [payload.signerId, req.params.token]
+    );
     if (!signer) return res.status(401).json({ error: 'Invalid signing token' });
     if (signer.status === 'signed') return res.status(409).json({ error: 'Already signed' });
 
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(signer.document_id);
+    const { rows: [doc] } = await pool.query('SELECT * FROM documents WHERE id = $1', [signer.document_id]);
     if (!doc || doc.status === 'voided') return res.status(410).json({ error: 'Document unavailable' });
 
-    const { signatures } = req.body; // [{field_id, signature_type, image_data}]
+    const { signatures } = req.body;
     if (!signatures || !Array.isArray(signatures)) {
       return res.status(400).json({ error: 'signatures array required' });
     }
 
-    const requiredFields = db.prepare(
-      'SELECT * FROM signature_fields WHERE document_id = ? AND signer_id = ? AND is_required = 1'
-    ).all(doc.id, signer.id);
+    const { rows: requiredFields } = await pool.query(
+      'SELECT * FROM signature_fields WHERE document_id = $1 AND signer_id = $2 AND is_required = TRUE',
+      [doc.id, signer.id]
+    );
 
-    const submittedFieldIds = new Set(signatures.map(s => String(s.field_id)));
-    const missing = requiredFields.filter(f => !submittedFieldIds.has(String(f.id)));
+    const submittedIds = new Set(signatures.map(s => String(s.field_id)));
+    const missing = requiredFields.filter(f => !submittedIds.has(String(f.id)));
     if (missing.length > 0) {
       return res.status(400).json({ error: `Missing required fields: ${missing.map(f => f.id).join(', ')}` });
     }
 
-    // Save signatures in a transaction
-    const insertSig = db.prepare(`
-      INSERT INTO signatures (field_id, signer_id, document_id, signature_type, image_data, ip_address, user_agent)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-    const saveAll = db.transaction(() => {
-      for (const sig of signatures) {
-        if (!sig.image_data || !sig.image_data.startsWith('data:image/')) {
-          throw new Error('Invalid signature image data');
-        }
-        insertSig.run(sig.field_id, signer.id, doc.id, sig.signature_type || 'drawn',
-                      sig.image_data, req.ip, req.headers['user-agent'] || null);
+    // Insert all signatures
+    for (const sig of signatures) {
+      if (!sig.image_data || !sig.image_data.startsWith('data:image/')) {
+        return res.status(400).json({ error: 'Invalid signature image data' });
       }
-      db.prepare(`
-        UPDATE signers SET status = 'signed', signed_at = datetime('now'), token_used_at = datetime('now')
-        WHERE id = ?
-      `).run(signer.id);
-    });
-    saveAll();
+      await pool.query(
+        `INSERT INTO signatures (field_id, signer_id, document_id, signature_type, image_data, ip_address, user_agent)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [sig.field_id, signer.id, doc.id, sig.signature_type || 'drawn',
+         sig.image_data, req.ip, req.headers['user-agent'] || null]
+      );
+    }
 
-    logEvent({
+    await pool.query(
+      "UPDATE signers SET status = 'signed', signed_at = NOW(), token_used_at = NOW() WHERE id = $1",
+      [signer.id]
+    );
+
+    await logEvent({
       documentId: doc.id, actorType: 'signer', actorId: signer.id,
       actorName: signer.name, eventType: 'signature_submitted',
       eventDetail: { fieldCount: signatures.length }, ipAddress: req.ip
     });
 
-    // Check if all signers done
-    const pending = db.prepare(
-      "SELECT id FROM signers WHERE document_id = ? AND status = 'pending'"
-    ).all(doc.id);
+    const { rows: pending } = await pool.query(
+      "SELECT id FROM signers WHERE document_id = $1 AND status = 'pending'", [doc.id]
+    );
 
     let newStatus = 'partially_signed';
     if (pending.length === 0) {
       newStatus = 'signed';
       try {
-        await embedSignaturesAndFinalize(doc.id);
-      } catch (e) {
-        console.error('PDF finalization error:', e.message);
-      }
-      logEvent({
+        const signedPdf = await embedSignaturesAndFinalize(doc.id);
+        await pool.query('UPDATE documents SET signed_pdf = $1 WHERE id = $2', [signedPdf, doc.id]);
+      } catch (e) { console.error('PDF finalization error:', e.message); }
+      await logEvent({
         documentId: doc.id, actorType: 'system', actorName: 'system',
         eventType: 'document_completed', ipAddress: req.ip
       });
     }
 
-    db.prepare("UPDATE documents SET status = ?, updated_at = datetime('now') WHERE id = ?")
-      .run(newStatus, doc.id);
+    await pool.query("UPDATE documents SET status = $1, updated_at = NOW() WHERE id = $2", [newStatus, doc.id]);
 
     res.json({ success: true, documentStatus: newStatus });
   } catch (err) { next(err); }
 });
 
 // POST /api/sign/:token/decline
-router.post('/:token/decline', (req, res, next) => {
+router.post('/:token/decline', async (req, res, next) => {
   try {
     let payload;
     try { payload = verifyToken(req.params.token); } catch {
       return res.status(401).json({ error: 'Invalid token' });
     }
-    const db = getDb();
-    const signer = db.prepare('SELECT * FROM signers WHERE id = ?').get(payload.signerId);
+    const pool = getPool();
+    const { rows: [signer] } = await pool.query('SELECT * FROM signers WHERE id = $1', [payload.signerId]);
     if (!signer) return res.status(404).json({ error: 'Signer not found' });
 
-    db.prepare("UPDATE signers SET status = 'declined' WHERE id = ?").run(signer.id);
-    db.prepare("UPDATE documents SET status = 'voided', updated_at = datetime('now') WHERE id = ?")
-      .run(signer.document_id);
-    logEvent({
+    await pool.query("UPDATE signers SET status = 'declined' WHERE id = $1", [signer.id]);
+    await pool.query("UPDATE documents SET status = 'voided', updated_at = NOW() WHERE id = $1", [signer.document_id]);
+    await logEvent({
       documentId: signer.document_id, actorType: 'signer', actorId: signer.id,
       actorName: signer.name, eventType: 'document_voided',
       eventDetail: { reason: 'declined_by_signer' }, ipAddress: req.ip
@@ -160,24 +152,27 @@ router.post('/:token/decline', (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/sign/:token/pdf — serve PDF file for viewing during signing
-router.get('/:token/pdf', (req, res, next) => {
+// GET /api/sign/:token/pdf — serve PDF from database
+router.get('/:token/pdf', async (req, res, next) => {
   try {
     let payload;
     try { payload = verifyToken(req.params.token); } catch {
       return res.status(401).json({ error: 'Invalid token' });
     }
-    const db = getDb();
-    const signer = db.prepare('SELECT * FROM signers WHERE id = ? AND signing_token = ?')
-      .get(payload.signerId, req.params.token);
+    const pool = getPool();
+    const { rows: [signer] } = await pool.query(
+      'SELECT * FROM signers WHERE id = $1 AND signing_token = $2', [payload.signerId, req.params.token]
+    );
     if (!signer) return res.status(401).json({ error: 'Invalid token' });
 
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(signer.document_id);
+    const { rows: [doc] } = await pool.query(
+      'SELECT filename, file_data FROM documents WHERE id = $1', [signer.document_id]
+    );
     if (!doc) return res.status(404).json({ error: 'Document not found' });
 
-    const path = require('path');
-    const filePath = path.join(__dirname, '../../uploads', doc.stored_name);
-    res.sendFile(filePath);
+    res.set('Content-Type', 'application/pdf');
+    res.set('Content-Disposition', `inline; filename="${doc.filename}"`);
+    res.send(doc.file_data);
   } catch (err) { next(err); }
 });
 

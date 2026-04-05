@@ -1,7 +1,5 @@
 const express = require('express');
-const path = require('path');
-const fs = require('fs');
-const { getDb } = require('../db/database');
+const { getPool } = require('../db/database');
 const { requireAuth } = require('../middleware/auth');
 const { upload } = require('../middleware/upload');
 const { logEvent } = require('../services/auditService');
@@ -9,16 +7,18 @@ const { embedSignaturesAndFinalize } = require('../services/pdfService');
 
 const router = express.Router();
 
-// GET /api/documents — list user's documents
-router.get('/', requireAuth, (req, res) => {
-  const { status } = req.query;
-  const db = getDb();
-  let query = 'SELECT * FROM documents WHERE owner_id = ?';
-  const params = [req.user.id];
-  if (status) { query += ' AND status = ?'; params.push(status); }
-  query += ' ORDER BY updated_at DESC';
-  const docs = db.prepare(query).all(...params);
-  res.json(docs);
+// GET /api/documents
+router.get('/', requireAuth, async (req, res, next) => {
+  try {
+    const { status } = req.query;
+    const pool = getPool();
+    let query = 'SELECT id, owner_id, title, filename, stored_name, file_type, status, page_count, created_at, updated_at FROM documents WHERE owner_id = $1';
+    const params = [req.user.id];
+    if (status) { query += ' AND status = $2'; params.push(status); }
+    query += ' ORDER BY updated_at DESC';
+    const { rows } = await pool.query(query, params);
+    res.json(rows);
+  } catch (err) { next(err); }
 });
 
 // POST /api/documents — upload document
@@ -28,31 +28,30 @@ router.post('/', requireAuth, upload.single('file'), async (req, res, next) => {
     const { title } = req.body;
     if (!title) return res.status(400).json({ error: 'title is required' });
 
-    const db = getDb();
-    const ext = path.extname(req.file.originalname).toLowerCase().replace('.', '');
+    const pool = getPool();
+    const ext = req.file.originalname.split('.').pop().toLowerCase();
+    const storedName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
     let pageCount = null;
 
     if (ext === 'pdf') {
       try {
         const { PDFDocument } = require('pdf-lib');
-        const bytes = fs.readFileSync(req.file.path);
-        const pdf = await PDFDocument.load(bytes);
+        const pdf = await PDFDocument.load(req.file.buffer);
         pageCount = pdf.getPageCount();
       } catch { pageCount = 1; }
     }
 
-    const result = db.prepare(`
-      INSERT INTO documents (owner_id, title, filename, stored_name, file_type, page_count)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(req.user.id, title, req.file.originalname, req.file.filename, ext, pageCount);
+    const { rows: [doc] } = await pool.query(
+      `INSERT INTO documents (owner_id, title, filename, stored_name, file_data, file_type, page_count)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, owner_id, title, filename, stored_name, file_type, status, page_count, created_at, updated_at`,
+      [req.user.id, title, req.file.originalname, storedName, req.file.buffer, ext, pageCount]
+    );
 
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(result.lastInsertRowid);
-
-    logEvent({
+    await logEvent({
       documentId: doc.id, actorType: 'user', actorId: req.user.id,
       actorName: req.user.name, eventType: 'document_created',
-      eventDetail: { title, filename: req.file.originalname },
-      ipAddress: req.ip
+      eventDetail: { title, filename: req.file.originalname }, ipAddress: req.ip
     });
 
     res.status(201).json(doc);
@@ -60,111 +59,129 @@ router.post('/', requireAuth, upload.single('file'), async (req, res, next) => {
 });
 
 // GET /api/documents/:id
-router.get('/:id', requireAuth, (req, res) => {
-  const db = getDb();
-  const doc = db.prepare('SELECT * FROM documents WHERE id = ? AND owner_id = ?')
-    .get(req.params.id, req.user.id);
-  if (!doc) return res.status(404).json({ error: 'Document not found' });
+router.get('/:id', requireAuth, async (req, res, next) => {
+  try {
+    const pool = getPool();
+    const { rows } = await pool.query(
+      'SELECT id, owner_id, title, filename, stored_name, file_type, status, page_count, created_at, updated_at FROM documents WHERE id = $1 AND owner_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Document not found' });
+    const doc = rows[0];
 
-  const signers = db.prepare('SELECT * FROM signers WHERE document_id = ? ORDER BY signing_order').all(doc.id);
-  const fields = db.prepare('SELECT * FROM signature_fields WHERE document_id = ?').all(doc.id);
-  res.json({ ...doc, signers, fields });
+    const [{ rows: signers }, { rows: fields }] = await Promise.all([
+      pool.query('SELECT * FROM signers WHERE document_id = $1 ORDER BY signing_order', [doc.id]),
+      pool.query('SELECT * FROM signature_fields WHERE document_id = $1', [doc.id])
+    ]);
+
+    res.json({ ...doc, signers, fields });
+  } catch (err) { next(err); }
 });
 
-// PATCH /api/documents/:id/send — transition to 'sent'
-router.patch('/:id/send', requireAuth, (req, res, next) => {
+// PATCH /api/documents/:id/send
+router.patch('/:id/send', requireAuth, async (req, res, next) => {
   try {
-    const db = getDb();
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ? AND owner_id = ?')
-      .get(req.params.id, req.user.id);
+    const pool = getPool();
+    const { rows } = await pool.query(
+      'SELECT * FROM documents WHERE id = $1 AND owner_id = $2', [req.params.id, req.user.id]
+    );
+    const doc = rows[0];
     if (!doc) return res.status(404).json({ error: 'Document not found' });
     if (doc.status !== 'draft') return res.status(409).json({ error: 'Only draft documents can be sent' });
 
-    const signers = db.prepare('SELECT * FROM signers WHERE document_id = ?').all(doc.id);
-    if (signers.length === 0) return res.status(400).json({ error: 'Add at least one signer before sending' });
+    const { rows: signers } = await pool.query('SELECT * FROM signers WHERE document_id = $1', [doc.id]);
+    if (!signers.length) return res.status(400).json({ error: 'Add at least one signer before sending' });
 
     const { signSignerToken } = require('../utils/token');
-    const updateSigner = db.prepare('UPDATE signers SET signing_token = ? WHERE id = ?');
-
     for (const signer of signers) {
       const token = signSignerToken(signer, doc.id);
-      updateSigner.run(token, signer.id);
+      await pool.query('UPDATE signers SET signing_token = $1 WHERE id = $2', [token, signer.id]);
     }
 
-    db.prepare("UPDATE documents SET status = 'sent', updated_at = datetime('now') WHERE id = ?").run(doc.id);
+    await pool.query("UPDATE documents SET status = 'sent', updated_at = NOW() WHERE id = $1", [doc.id]);
 
-    logEvent({
+    await logEvent({
       documentId: doc.id, actorType: 'user', actorId: req.user.id,
       actorName: req.user.name, eventType: 'document_sent',
       eventDetail: { signerCount: signers.length }, ipAddress: req.ip
     });
 
-    const updatedSigners = db.prepare('SELECT * FROM signers WHERE document_id = ?').all(doc.id);
+    const { rows: updatedSigners } = await pool.query('SELECT * FROM signers WHERE document_id = $1', [doc.id]);
     res.json({ status: 'sent', signers: updatedSigners });
   } catch (err) { next(err); }
 });
 
 // PATCH /api/documents/:id/void
-router.patch('/:id/void', requireAuth, (req, res, next) => {
+router.patch('/:id/void', requireAuth, async (req, res, next) => {
   try {
-    const db = getDb();
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ? AND owner_id = ?')
-      .get(req.params.id, req.user.id);
-    if (!doc) return res.status(404).json({ error: 'Document not found' });
-    if (doc.status === 'voided') return res.status(409).json({ error: 'Already voided' });
+    const pool = getPool();
+    const { rows } = await pool.query(
+      'SELECT id, status FROM documents WHERE id = $1 AND owner_id = $2', [req.params.id, req.user.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Document not found' });
+    if (rows[0].status === 'voided') return res.status(409).json({ error: 'Already voided' });
 
-    db.prepare("UPDATE documents SET status = 'voided', updated_at = datetime('now') WHERE id = ?").run(doc.id);
-    logEvent({
-      documentId: doc.id, actorType: 'user', actorId: req.user.id,
+    await pool.query("UPDATE documents SET status = 'voided', updated_at = NOW() WHERE id = $1", [req.params.id]);
+    await logEvent({
+      documentId: Number(req.params.id), actorType: 'user', actorId: req.user.id,
       actorName: req.user.name, eventType: 'document_voided', ipAddress: req.ip
     });
     res.json({ status: 'voided' });
   } catch (err) { next(err); }
 });
 
-// GET /api/documents/:id/download — original file
-router.get('/:id/download', requireAuth, (req, res) => {
-  const db = getDb();
-  const doc = db.prepare('SELECT * FROM documents WHERE id = ? AND owner_id = ?')
-    .get(req.params.id, req.user.id);
-  if (!doc) return res.status(404).json({ error: 'Document not found' });
-
-  const filePath = path.join(__dirname, '../../uploads', doc.stored_name);
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
-  res.download(filePath, doc.filename);
+// GET /api/documents/:id/download — serve original file
+router.get('/:id/download', requireAuth, async (req, res, next) => {
+  try {
+    const { rows } = await getPool().query(
+      'SELECT filename, file_data, file_type FROM documents WHERE id = $1 AND owner_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Document not found' });
+    const { filename, file_data, file_type } = rows[0];
+    const mime = file_type === 'pdf' ? 'application/pdf' : 'application/octet-stream';
+    res.set('Content-Type', mime);
+    res.set('Content-Disposition', `inline; filename="${filename}"`);
+    res.send(file_data);
+  } catch (err) { next(err); }
 });
 
 // GET /api/documents/:id/finalized — signed PDF
 router.get('/:id/finalized', requireAuth, async (req, res, next) => {
   try {
-    const db = getDb();
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ? AND owner_id = ?')
-      .get(req.params.id, req.user.id);
-    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const pool = getPool();
+    const { rows } = await pool.query(
+      'SELECT id, title, filename, status, signed_pdf FROM documents WHERE id = $1 AND owner_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Document not found' });
+    const doc = rows[0];
 
-    const processedPath = path.join(__dirname, '../../processed', `${doc.stored_name}_signed.pdf`);
-    if (fs.existsSync(processedPath)) {
-      return res.download(processedPath, `signed_${doc.filename}`);
+    let pdfBuffer = doc.signed_pdf;
+    if (!pdfBuffer) {
+      if (!['signed', 'completed'].includes(doc.status)) {
+        return res.status(400).json({ error: 'Document is not fully signed yet' });
+      }
+      pdfBuffer = await embedSignaturesAndFinalize(doc.id);
     }
 
-    if (!['signed', 'completed'].includes(doc.status)) {
-      return res.status(400).json({ error: 'Document is not fully signed yet' });
-    }
-
-    const pdfPath = await embedSignaturesAndFinalize(doc.id);
-    res.download(pdfPath, `signed_${doc.filename}`);
+    res.set('Content-Type', 'application/pdf');
+    res.set('Content-Disposition', `attachment; filename="signed_${doc.filename}"`);
+    res.send(pdfBuffer);
   } catch (err) { next(err); }
 });
 
 // DELETE /api/documents/:id
-router.delete('/:id', requireAuth, (req, res) => {
-  const db = getDb();
-  const doc = db.prepare('SELECT * FROM documents WHERE id = ? AND owner_id = ?')
-    .get(req.params.id, req.user.id);
-  if (!doc) return res.status(404).json({ error: 'Document not found' });
-
-  db.prepare('DELETE FROM documents WHERE id = ?').run(doc.id);
-  res.json({ deleted: true });
+router.delete('/:id', requireAuth, async (req, res, next) => {
+  try {
+    const pool = getPool();
+    const { rows } = await pool.query(
+      'SELECT id FROM documents WHERE id = $1 AND owner_id = $2', [req.params.id, req.user.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Document not found' });
+    await pool.query('DELETE FROM documents WHERE id = $1', [req.params.id]);
+    res.json({ deleted: true });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

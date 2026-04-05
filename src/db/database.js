@@ -1,77 +1,75 @@
-const Database = require('better-sqlite3');
-const path = require('path');
+const { Pool } = require('pg');
 
-const DB_PATH = path.join(__dirname, '../../data/zemel_sign.db');
-let db;
+let pool;
 
-function getDb() {
-  if (!db) throw new Error('Database not initialized. Call initDb() first.');
-  return db;
+function getPool() {
+  if (!pool) {
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+    });
+  }
+  return pool;
 }
 
-function initDb() {
-  db = new Database(DB_PATH);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  runMigrations(db);
-  return db;
-}
-
-function runMigrations(db) {
-  db.exec(`
+async function initDb() {
+  const p = getPool();
+  await p.query(`
     CREATE TABLE IF NOT EXISTS users (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      id            SERIAL PRIMARY KEY,
       email         TEXT UNIQUE NOT NULL,
       name          TEXT NOT NULL,
       password_hash TEXT NOT NULL,
       language      TEXT NOT NULL DEFAULT 'en',
-      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS documents (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      id           SERIAL PRIMARY KEY,
       owner_id     INTEGER NOT NULL REFERENCES users(id),
       title        TEXT NOT NULL,
       filename     TEXT NOT NULL,
       stored_name  TEXT NOT NULL,
+      file_data    BYTEA,
+      signed_pdf   BYTEA,
       file_type    TEXT NOT NULL DEFAULT 'pdf',
       status       TEXT NOT NULL DEFAULT 'draft',
       page_count   INTEGER,
-      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS signers (
-      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      id             SERIAL PRIMARY KEY,
       document_id    INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
       user_id        INTEGER REFERENCES users(id),
       name           TEXT NOT NULL,
       email          TEXT NOT NULL,
       signing_order  INTEGER NOT NULL DEFAULT 1,
       signing_token  TEXT UNIQUE,
-      token_used_at  TEXT,
-      signed_at      TEXT,
+      token_used_at  TIMESTAMPTZ,
+      signed_at      TIMESTAMPTZ,
       status         TEXT NOT NULL DEFAULT 'pending',
-      created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS signature_fields (
-      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      id             SERIAL PRIMARY KEY,
       document_id    INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
       signer_id      INTEGER NOT NULL REFERENCES signers(id) ON DELETE CASCADE,
       page_number    INTEGER NOT NULL,
-      x_percent      REAL NOT NULL,
-      y_percent      REAL NOT NULL,
-      width_percent  REAL NOT NULL,
-      height_percent REAL NOT NULL,
+      x_percent      FLOAT NOT NULL,
+      y_percent      FLOAT NOT NULL,
+      width_percent  FLOAT NOT NULL,
+      height_percent FLOAT NOT NULL,
       field_type     TEXT NOT NULL DEFAULT 'signature',
       label          TEXT,
-      is_required    INTEGER NOT NULL DEFAULT 1,
-      created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+      is_required    BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS signatures (
-      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      id             SERIAL PRIMARY KEY,
       field_id       INTEGER NOT NULL REFERENCES signature_fields(id),
       signer_id      INTEGER NOT NULL REFERENCES signers(id),
       document_id    INTEGER NOT NULL REFERENCES documents(id),
@@ -79,28 +77,29 @@ function runMigrations(db) {
       image_data     TEXT NOT NULL,
       ip_address     TEXT,
       user_agent     TEXT,
-      signed_at      TEXT NOT NULL DEFAULT (datetime('now'))
+      signed_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS audit_events (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      id           SERIAL PRIMARY KEY,
       document_id  INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
       actor_type   TEXT NOT NULL,
       actor_id     INTEGER,
       actor_name   TEXT,
       event_type   TEXT NOT NULL,
-      event_detail TEXT,
+      event_detail JSONB,
       ip_address   TEXT,
-      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE INDEX IF NOT EXISTS idx_documents_owner    ON documents(owner_id);
-    CREATE INDEX IF NOT EXISTS idx_signers_document   ON signers(document_id);
-    CREATE INDEX IF NOT EXISTS idx_signers_token      ON signers(signing_token);
-    CREATE INDEX IF NOT EXISTS idx_fields_document    ON signature_fields(document_id);
+    CREATE INDEX IF NOT EXISTS idx_documents_owner     ON documents(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_signers_document    ON signers(document_id);
+    CREATE INDEX IF NOT EXISTS idx_signers_token       ON signers(signing_token);
+    CREATE INDEX IF NOT EXISTS idx_fields_document     ON signature_fields(document_id);
     CREATE INDEX IF NOT EXISTS idx_signatures_document ON signatures(document_id);
-    CREATE INDEX IF NOT EXISTS idx_audit_document     ON audit_events(document_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_document      ON audit_events(document_id);
   `);
+  console.log('Database schema ready');
 }
 
-module.exports = { initDb, getDb };
+module.exports = { getPool, initDb };

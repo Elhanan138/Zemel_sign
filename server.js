@@ -1,7 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const fs = require('fs');
 
 const { initDb } = require('./src/db/database');
 const authRoutes = require('./src/routes/auth');
@@ -14,15 +13,6 @@ const errorHandler = require('./src/middleware/errorHandler');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Ensure required directories exist
-['uploads', 'processed', 'data'].forEach(dir => {
-  const dirPath = path.join(__dirname, dir);
-  if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
-});
-
-// Init database
-initDb();
 
 // Middleware
 app.use(express.json({ limit: '50mb' }));
@@ -37,7 +27,7 @@ app.use('/api/documents', fieldRoutes);
 app.use('/api/sign', signatureRoutes);
 app.use('/api/documents', auditRoutes);
 
-// Serve HTML pages
+// HTML pages
 const pages = ['index', 'upload', 'place-fields', 'sign', 'audit', 'login', 'register'];
 pages.forEach(page => {
   app.get(`/${page === 'index' ? '' : page}`, (req, res) => {
@@ -45,11 +35,21 @@ pages.forEach(page => {
   });
 });
 
-// Error handler
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`\n🖊️  Zemel Sign running at http://localhost:${PORT}`);
-  console.log(`   Dashboard: http://localhost:${PORT}/`);
-  console.log(`   Press Ctrl+C to stop\n`);
+// Init DB then start server (or export for Vercel)
+const boot = initDb().catch(err => {
+  console.error('DB init failed:', err.message);
+  process.exit(1);
 });
+
+if (require.main === module) {
+  boot.then(() => {
+    app.listen(PORT, () => {
+      console.log(`\n✍  Zemel Sign running at http://localhost:${PORT}\n`);
+    });
+  });
+}
+
+// Vercel needs the app exported
+module.exports = app;
