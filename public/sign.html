@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zemel Sign — Sign Document</title>
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/rtl.css" id="rtl-stylesheet" disabled>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    .sign-layout { display: flex; height: calc(100vh - 60px); overflow: hidden; }
+    .sign-sidebar { width: 300px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); overflow-y: auto; padding: 16px; }
+    .sign-canvas-area { flex: 1; overflow: auto; background: var(--bg-canvas); display: flex; flex-direction: column; align-items: center; padding: 24px; gap: 24px; }
+    .pdf-page-wrapper { position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
+    .field-box { position: absolute; border: 2px dashed #3b82f6; border-radius: 4px; background: rgba(59,130,246,0.08); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .15s; }
+    .field-box:hover { background: rgba(59,130,246,0.18); }
+    .field-box.signed { border-color: #10b981; background: transparent; cursor: default; }
+    .field-box .field-prompt { font-size: 12px; color: #3b82f6; font-weight: 600; pointer-events: none; }
+    .sig-pad-wrapper { margin-top: 16px; }
+    .sig-type-tabs { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
+    .sig-type-tab { flex: 1; padding: 8px; background: var(--surface); border: none; cursor: pointer; font-size: 13px; transition: all .15s; }
+    .sig-type-tab.active { background: var(--primary); color: white; }
+    #drawCanvas { border: 1.5px solid var(--border); border-radius: 8px; background: white; cursor: crosshair; touch-action: none; width: 100%; }
+    .sig-actions { display: flex; gap: 8px; margin-top: 8px; }
+    .typed-sig-preview { border: 1.5px solid var(--border); border-radius: 8px; background: white; height: 80px; display: flex; align-items: center; justify-content: center; font-family: 'Brush Script MT', cursive; font-size: 32px; color: #1e3a8a; padding: 8px; }
+    .field-item { padding: 10px; border-radius: 8px; border: 1.5px solid var(--border); margin-bottom: 8px; cursor: pointer; transition: all .15s; }
+    .field-item:hover { border-color: var(--primary); }
+    .field-item.done { border-color: #10b981; background: #f0fdf4; }
+    .field-item .field-item-type { font-size: 11px; text-transform: uppercase; color: var(--text-muted); }
+    .field-item .field-item-page { font-size: 12px; }
+    [dir=rtl] .sign-sidebar { border-right: none; border-left: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">
+      <span class="logo-icon">✍</span>
+      <span class="logo-title">Zemel Sign</span>
+    </div>
+    <div class="nav-actions">
+      <div class="lang-toggle-row">
+        <button class="btn-lang active" id="btn-en" onclick="setLang('en')">EN</button>
+        <button class="btn-lang" id="btn-he" onclick="setLang('he')">עב</button>
+      </div>
+    </div>
+  </nav>
+
+  <div id="waitingMsg" class="hidden" style="padding:48px;text-align:center">
+    <div style="font-size:48px">⏳</div>
+    <h2 data-i18n="waiting_signers">Waiting for previous signers</h2>
+    <p data-i18n="waiting_signers_desc">You will be notified when it is your turn to sign.</p>
+  </div>
+
+  <div id="signedMsg" class="hidden" style="padding:48px;text-align:center">
+    <div style="font-size:64px">✅</div>
+    <h2 data-i18n="already_signed">You have already signed this document</h2>
+    <p data-i18n="already_signed_desc">Thank you for signing. The document is being processed.</p>
+  </div>
+
+  <div id="mainLayout" class="sign-layout hidden">
+    <!-- Sidebar -->
+    <div class="sign-sidebar">
+      <div id="signerInfo" style="margin-bottom:16px">
+        <div style="font-size:13px;color:var(--text-muted)" data-i18n="signing_as">Signing as</div>
+        <div id="signerName" style="font-weight:700;font-size:16px"></div>
+        <div id="docTitleDisplay" style="font-size:13px;color:var(--text-muted);margin-top:4px"></div>
+      </div>
+
+      <h4 data-i18n="fields_to_sign">Fields to Sign</h4>
+      <div id="fieldList"></div>
+
+      <!-- Signature Pad -->
+      <div id="sigPadSection" class="sig-pad-wrapper hidden">
+        <h4 id="sigPadTitle" data-i18n="your_signature">Your Signature</h4>
+        <div class="sig-type-tabs">
+          <button class="sig-type-tab active" data-tab="draw" onclick="switchSigTab('draw')" data-i18n="sig_draw">Draw</button>
+          <button class="sig-type-tab" data-tab="type" onclick="switchSigTab('type')" data-i18n="sig_type">Type</button>
+          <button class="sig-type-tab" data-tab="upload" onclick="switchSigTab('upload')" data-i18n="sig_upload">Upload</button>
+        </div>
+
+        <div id="tabDraw">
+          <canvas id="drawCanvas" width="260" height="100"></canvas>
+          <div class="sig-actions">
+            <button class="btn btn-ghost btn-sm" onclick="clearDraw()" data-i18n="clear">Clear</button>
+            <button class="btn btn-primary btn-sm" onclick="applySignature('drawn')" data-i18n="apply_sig">Apply</button>
+          </div>
+        </div>
+
+        <div id="tabType" class="hidden">
+          <input type="text" id="typedSig" style="font-size:18px;width:100%;margin-bottom:8px"
+                 data-i18n-placeholder="type_your_name" placeholder="Type your name" oninput="updateTypedPreview()">
+          <div class="typed-sig-preview" id="typedPreview"></div>
+          <div class="sig-actions" style="margin-top:8px">
+            <button class="btn btn-primary btn-sm" onclick="applySignature('typed')" data-i18n="apply_sig">Apply</button>
+          </div>
+        </div>
+
+        <div id="tabUpload" class="hidden">
+          <input type="file" id="uploadSigFile" accept="image/*" onchange="handleSigUpload(event)">
+          <div id="uploadSigPreview" style="margin-top:8px"></div>
+          <div class="sig-actions">
+            <button class="btn btn-primary btn-sm" onclick="applySignature('uploaded')" data-i18n="apply_sig">Apply</button>
+          </div>
+        </div>
+      </div>
+
+      <hr style="margin:16px 0">
+      <button id="btnSubmit" class="btn btn-primary btn-full" onclick="submitSignatures()" disabled data-i18n="submit_signatures">Submit Signatures</button>
+      <button class="btn btn-ghost btn-full" style="margin-top:8px;color:#e53e3e" onclick="declineDocument()" data-i18n="decline_btn">Decline to Sign</button>
+    </div>
+
+    <!-- PDF View -->
+    <div class="sign-canvas-area" id="signCanvasArea">
+      <div class="loading-spinner"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+  <script src="/js/i18n.js"></script>
+  <script src="/js/signaturePad.js"></script>
+</body>
+</html>

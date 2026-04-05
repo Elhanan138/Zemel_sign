@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zemel Sign — Place Fields</title>
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/rtl.css" id="rtl-stylesheet" disabled>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    .placer-layout { display: flex; height: calc(100vh - 60px); overflow: hidden; }
+    .placer-sidebar { width: 280px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); overflow-y: auto; padding: 16px; }
+    .placer-canvas-area { flex: 1; overflow: auto; background: var(--bg-canvas); display: flex; flex-direction: column; align-items: center; padding: 24px; gap: 24px; }
+    .pdf-page-wrapper { position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
+    .pdf-page-wrapper canvas { display: block; }
+    .field-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; }
+    .sig-field { position: absolute; border: 2px dashed; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; cursor: move; user-select: none; }
+    .sig-field .field-label { pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; }
+    .sig-field .delete-field { position: absolute; top: -10px; right: -10px; width: 20px; height: 20px; border-radius: 50%; background: #e53e3e; color: white; border: none; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; padding: 0; }
+    .sig-field .resize-handle { position: absolute; bottom: -4px; right: -4px; width: 12px; height: 12px; background: white; border: 2px solid; border-radius: 2px; cursor: se-resize; }
+    .signer-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; border: 2px solid transparent; transition: all .15s; }
+    .signer-chip.selected { border-color: currentColor; }
+    .signer-chip .chip-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+    .signer-chip .chip-info { flex: 1; min-width: 0; }
+    .signer-chip .chip-name { font-weight: 600; font-size: 14px; }
+    .signer-chip .chip-email { font-size: 11px; opacity: .7; }
+    .field-type-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+    .field-type-btn { padding: 5px 10px; border-radius: 6px; border: 1.5px solid var(--border); background: var(--surface); cursor: pointer; font-size: 12px; transition: all .15s; }
+    .field-type-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+    [dir=rtl] .placer-sidebar { border-right: none; border-left: 1px solid var(--border); }
+    [dir=rtl] .sig-field .delete-field { right: auto; left: -10px; }
+    [dir=rtl] .sig-field .resize-handle { right: auto; left: -4px; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">
+      <a href="/" class="logo-link"><span class="logo-icon">✍</span><span class="logo-title">Zemel Sign</span></a>
+    </div>
+    <div class="nav-actions">
+      <div class="lang-toggle-row">
+        <button class="btn-lang active" id="btn-en" onclick="setLang('en')">EN</button>
+        <button class="btn-lang" id="btn-he" onclick="setLang('he')">עב</button>
+      </div>
+      <button class="btn btn-ghost" onclick="logout()" data-i18n="logout">Logout</button>
+    </div>
+  </nav>
+
+  <div class="placer-layout">
+    <!-- Sidebar -->
+    <div class="placer-sidebar">
+      <h3 data-i18n="signers_label">Signers</h3>
+      <div id="signerChips"></div>
+
+      <hr style="margin: 16px 0; border-color: var(--border);">
+
+      <h4 data-i18n="field_type_label">Field Type</h4>
+      <div class="field-type-btns">
+        <button class="field-type-btn active" data-type="signature" data-i18n="type_signature">Signature</button>
+        <button class="field-type-btn" data-type="initials" data-i18n="type_initials">Initials</button>
+        <button class="field-type-btn" data-type="date" data-i18n="type_date">Date</button>
+      </div>
+
+      <hr style="margin: 16px 0; border-color: var(--border);">
+      <p class="help-text" data-i18n="field_place_hint">Select a signer, then click and drag on the document to place a field.</p>
+
+      <hr style="margin: 16px 0; border-color: var(--border);">
+      <button id="btnSaveSend" class="btn btn-primary btn-full" onclick="saveAndSend()" data-i18n="save_send_btn">Save & Send for Signing</button>
+      <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="history.back()" data-i18n="back">Back</button>
+    </div>
+
+    <!-- PDF Canvas Area -->
+    <div class="placer-canvas-area" id="canvasArea">
+      <div class="loading-spinner"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+  <script src="/js/i18n.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/fieldPlacer.js"></script>
+</body>
+</html>

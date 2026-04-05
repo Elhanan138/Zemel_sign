@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zemel Sign — Audit Trail</title>
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/rtl.css" id="rtl-stylesheet" disabled>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">
+      <a href="/" class="logo-link"><span class="logo-icon">✍</span><span class="logo-title">Zemel Sign</span></a>
+    </div>
+    <div class="nav-actions">
+      <div class="lang-toggle-row">
+        <button class="btn-lang active" id="btn-en" onclick="setLang('en')">EN</button>
+        <button class="btn-lang" id="btn-he" onclick="setLang('he')">עב</button>
+      </div>
+      <button class="btn btn-ghost" onclick="logout()" data-i18n="logout">Logout</button>
+    </div>
+  </nav>
+
+  <main class="main-content narrow">
+    <div class="page-header">
+      <a href="/" class="back-link" id="backLink">← <span data-i18n="back">Back</span></a>
+      <div>
+        <h1 data-i18n="audit_title">Audit Trail</h1>
+        <p id="docTitleDisplay" style="color:var(--text-muted);margin:0"></p>
+      </div>
+    </div>
+
+    <div id="auditList" class="audit-timeline">
+      <div class="loading-spinner"><div class="spinner"></div></div>
+    </div>
+  </main>
+
+  <script src="/js/i18n.js"></script>
+  <script src="/js/api.js"></script>
+  <script>
+    requireAuth();
+    const docId = new URLSearchParams(location.search).get('id');
+
+    async function loadAudit() {
+      if (!docId) return;
+      try {
+        const doc = await apiGet(`/api/documents/${docId}`);
+        document.getElementById('docTitleDisplay').textContent = doc.title;
+        document.getElementById('backLink').href = '/';
+
+        const events = await apiGet(`/api/documents/${docId}/audit`);
+        const container = document.getElementById('auditList');
+        if (!events.length) {
+          container.innerHTML = `<p style="text-align:center;color:var(--text-muted)" data-i18n="no_events">No events yet</p>`;
+          applyI18n();
+          return;
+        }
+
+        container.innerHTML = events.map(ev => `
+          <div class="audit-event">
+            <div class="audit-dot ${ev.event_type}"></div>
+            <div class="audit-body">
+              <div class="audit-event-type">${formatEventType(ev.event_type)}</div>
+              <div class="audit-actor">${ev.actor_name || 'System'} · ${ev.actor_type}</div>
+              ${ev.event_detail ? `<div class="audit-detail">${JSON.stringify(ev.event_detail)}</div>` : ''}
+              ${ev.ip_address ? `<div class="audit-ip">IP: ${ev.ip_address}</div>` : ''}
+              <div class="audit-time">${new Date(ev.created_at).toLocaleString()}</div>
+            </div>
+          </div>
+        `).join('');
+      } catch (err) {
+        document.getElementById('auditList').innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+      }
+    }
+
+    function formatEventType(type) {
+      const map = {
+        document_created: '📄 Document Created',
+        document_sent: '📨 Document Sent',
+        signer_added: '👤 Signer Added',
+        field_placed: '🖊 Field Placed',
+        signing_link_accessed: '🔗 Signing Link Accessed',
+        signature_submitted: '✍ Signature Submitted',
+        document_completed: '✅ Document Completed',
+        document_voided: '🚫 Document Voided'
+      };
+      return map[type] || type;
+    }
+
+    loadAudit();
+  </script>
+</body>
+</html>

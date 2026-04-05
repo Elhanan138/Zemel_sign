@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zemel Sign — Dashboard</title>
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/rtl.css" id="rtl-stylesheet" disabled>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">
+      <span class="logo-icon">✍</span>
+      <span class="logo-title">Zemel Sign</span>
+    </div>
+    <div class="nav-actions">
+      <div class="lang-toggle-row">
+        <button class="btn-lang active" id="btn-en" onclick="setLang('en')">EN</button>
+        <button class="btn-lang" id="btn-he" onclick="setLang('he')">עב</button>
+      </div>
+      <span class="nav-user" id="navUser"></span>
+      <button class="btn btn-ghost" onclick="logout()" data-i18n="logout">Logout</button>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <h1 data-i18n="dashboard_title">My Documents</h1>
+      <a href="/upload" class="btn btn-primary">
+        <span>+</span> <span data-i18n="new_document">New Document</span>
+      </a>
+    </div>
+
+    <div class="filter-bar">
+      <button class="filter-btn active" data-status="" data-i18n="filter_all">All</button>
+      <button class="filter-btn" data-status="draft" data-i18n="filter_draft">Draft</button>
+      <button class="filter-btn" data-status="sent" data-i18n="filter_sent">Sent</button>
+      <button class="filter-btn" data-status="signed" data-i18n="filter_signed">Signed</button>
+      <button class="filter-btn" data-status="completed" data-i18n="filter_completed">Completed</button>
+      <button class="filter-btn" data-status="voided" data-i18n="filter_voided">Voided</button>
+    </div>
+
+    <div id="docList" class="doc-list">
+      <div class="loading-spinner">
+        <div class="spinner"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Document card template -->
+  <template id="docCardTpl">
+    <div class="doc-card" data-id="">
+      <div class="doc-card-header">
+        <div class="doc-icon">📄</div>
+        <div class="doc-info">
+          <h3 class="doc-title"></h3>
+          <span class="doc-meta"></span>
+        </div>
+        <span class="status-badge"></span>
+      </div>
+      <div class="doc-card-footer">
+        <span class="doc-signers"></span>
+        <div class="doc-actions"></div>
+      </div>
+    </div>
+  </template>
+
+  <script src="/js/i18n.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/dashboard.js"></script>
+</body>
+</html>

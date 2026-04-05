@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zemel Sign — Upload Document</title>
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/rtl.css" id="rtl-stylesheet" disabled>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">
+      <a href="/" class="logo-link">
+        <span class="logo-icon">✍</span>
+        <span class="logo-title">Zemel Sign</span>
+      </a>
+    </div>
+    <div class="nav-actions">
+      <div class="lang-toggle-row">
+        <button class="btn-lang active" id="btn-en" onclick="setLang('en')">EN</button>
+        <button class="btn-lang" id="btn-he" onclick="setLang('he')">עב</button>
+      </div>
+      <button class="btn btn-ghost" onclick="logout()" data-i18n="logout">Logout</button>
+    </div>
+  </nav>
+
+  <main class="main-content narrow">
+    <div class="page-header">
+      <a href="/" class="back-link">← <span data-i18n="back">Back</span></a>
+      <h1 data-i18n="upload_title">Upload Document</h1>
+    </div>
+
+    <!-- Step 1: File + Title -->
+    <div id="step1" class="card step-card">
+      <div class="step-label"><span class="step-number">1</span> <span data-i18n="step1_label">Document Details</span></div>
+
+      <div class="form-group">
+        <label data-i18n="doc_title">Document Title</label>
+        <input type="text" id="docTitle" placeholder="e.g. Employment Contract" required>
+      </div>
+
+      <div class="drop-zone" id="dropZone">
+        <div class="drop-icon">📎</div>
+        <p data-i18n="drop_hint">Drag & drop PDF or DOCX here, or click to browse</p>
+        <input type="file" id="fileInput" accept=".pdf,.docx,.doc" hidden>
+        <button class="btn btn-outline" onclick="document.getElementById('fileInput').click()" data-i18n="browse_file">Browse File</button>
+      </div>
+      <div id="filePreview" class="file-preview hidden">
+        <span class="file-icon">📄</span>
+        <span id="fileName"></span>
+        <button class="btn-icon" onclick="clearFile()" title="Remove">✕</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Signers -->
+    <div id="step2" class="card step-card hidden">
+      <div class="step-label"><span class="step-number">2</span> <span data-i18n="step2_label">Add Signers</span></div>
+
+      <div id="signerList" class="signer-list"></div>
+
+      <div class="add-signer-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label data-i18n="signer_name">Name</label>
+            <input type="text" id="signerName" data-i18n-placeholder="signer_name_ph" placeholder="Full name">
+          </div>
+          <div class="form-group">
+            <label data-i18n="signer_email">Email</label>
+            <input type="email" id="signerEmail" data-i18n-placeholder="signer_email_ph" placeholder="email@example.com">
+          </div>
+          <div class="form-group narrow">
+            <label data-i18n="signing_order">Order</label>
+            <input type="number" id="signerOrder" value="1" min="1" max="10">
+          </div>
+          <button class="btn btn-outline align-end" onclick="addSigner()" data-i18n="add_signer">Add</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="step-actions">
+      <button id="btnUpload" class="btn btn-primary" onclick="doUpload()" data-i18n="upload_btn">Upload Document</button>
+      <button id="btnSend" class="btn btn-success hidden" onclick="sendDocument()" data-i18n="send_btn">Send for Signing</button>
+      <button id="btnPlaceFields" class="btn btn-secondary hidden" onclick="goToPlaceFields()" data-i18n="place_fields_btn">Place Signature Fields</button>
+    </div>
+
+    <div id="uploadProgress" class="progress-bar hidden">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <div id="uploadError" class="alert alert-error hidden"></div>
+    <div id="uploadSuccess" class="alert alert-success hidden"></div>
+  </main>
+
+  <script src="/js/i18n.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/uploader.js"></script>
+</body>
+</html>
