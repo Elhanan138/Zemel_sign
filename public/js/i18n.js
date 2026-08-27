@@ -222,6 +222,11 @@ function applyI18n() {
 }
 
 function logout() {
+  const token = localStorage.getItem('token');
+  if (token) {
+    fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+      .catch(() => {});
+  }
   localStorage.removeItem('token');
   localStorage.removeItem('user');
   window.location.href = '/login';

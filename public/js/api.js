@@ -1,8 +1,17 @@
 // API helper with auth headers
 function getToken() { return localStorage.getItem('token'); }
 
+function isTokenExpired() {
+  const token = getToken();
+  if (!token) return true;
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return Date.now() >= payload.exp * 1000;
+  } catch { return true; }
+}
+
 function requireAuth() {
-  if (!getToken()) { window.location.href = '/login'; return false; }
+  if (!getToken() || isTokenExpired()) { logout(); return false; }
   return true;
 }
 
